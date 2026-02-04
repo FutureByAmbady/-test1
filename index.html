@@ -113,7 +113,15 @@ input {
         </div>
     </div>
 
-    <video id="video" autoplay playsinline></video>
+    <div style="margin-top:18px; display:flex; gap:8px; justify-content:center; align-items:center;">
+        <select id="videoSource" style="padding:8px; border-radius:8px; display:none;"></select>
+        <button class="icon" id="cameraBtn" onclick="toggleCamera()" style="width:auto;height:48px;font-size:1.4rem;padding:0 14px;">Toggle Camera</button>
+        <button class="icon" id="refreshDevices" onclick="updateDeviceList()" style="width:auto;height:48px;font-size:1.1rem;padding:0 12px;">Refresh Devices</button>
+    </div>
+
+    <video id="video" autoplay playsinline muted style="display:none"></video>
+
+    <div id="msg" style="margin-top:12px;color:#ffd; font-size:0.9rem;">Tip: If camera doesn't appear, serve this page over HTTP(S) (see below).</div>
 
     <input id="ttsText" type="text" placeholder="Type what the robot should say...">
 </div>
@@ -123,20 +131,60 @@ let camStream = null;
 let micStream = null;
 let audioElem = null;
 
+// helper getters
+const msgEl = () => document.getElementById('msg');
+const videoSelect = () => document.getElementById('videoSource');
+const videoEl = () => document.getElementById('video');
+
 // CAMERA
 async function toggleCamera() {
-    const video = document.getElementById("video");
+    const video = videoEl();
 
     if (camStream) {
         camStream.getTracks().forEach(t => t.stop());
         camStream = null;
-        video.style.display = "none";
+        video.style.display = 'none';
+        msgEl().textContent = 'Camera stopped.';
         return;
     }
 
-    camStream = await navigator.mediaDevices.getUserMedia({ video: true });
-    video.srcObject = camStream;
-    video.style.display = "block";
+    // Check secure context (getUserMedia requires HTTPS or localhost)
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        msgEl().innerHTML = 'Camera requires a secure context (HTTPS) or running on <strong>localhost</strong>. Run a local server (see instructions below).';
+        return;
+    }
+
+    // Build constraints with optional selected device and conservative resolution for Raspberry Pi
+    let deviceId = videoSelect().value || undefined;
+    const constraints = {
+        video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            facingMode: 'environment'
+        },
+        audio: false
+    };
+
+    try {
+        camStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = camStream;
+        video.muted = true; // help autoplay policies
+        video.playsInline = true;
+        await video.play();
+        video.style.display = 'block';
+        msgEl().textContent = 'Camera active.';
+        await updateDeviceList();
+    } catch (err) {
+        console.error('getUserMedia error', err);
+        if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+            msgEl().textContent = 'Permission denied for camera. Check browser permissions.';
+        } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+            msgEl().textContent = 'No camera found or requested constraints not supported. Try Refresh Devices.';
+        } else {
+            msgEl().textContent = 'Camera error: ' + err.message;
+        }
+    }
 }
 
 // MIC → SPEAKER LOOPBACK
@@ -148,12 +196,16 @@ async function toggleMic() {
         return;
     }
 
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioElem = new Audio();
-    audioElem.srcObject = micStream;
-    audioElem.play();
+    try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioElem = new Audio();
+        audioElem.srcObject = micStream;
+        audioElem.play();
+    } catch (err) {
+        console.error('Microphone error', err);
+        msgEl().textContent = 'Microphone error: ' + (err.message || err.name);
+    }
 }
-
 
 // TEXT TO SPEECH
 let femaleVoice = null;
@@ -163,28 +215,26 @@ function loadVoices() {
     const voices = speechSynthesis.getVoices();
 
     femaleVoice = voices.find(v =>
-        v.name.toLowerCase().includes("zira") ||
-        v.name.toLowerCase().includes("aria") ||
-        v.name.toLowerCase().includes("female") ||
-        v.name.toLowerCase().includes("woman")
+        v.name.toLowerCase().includes('zira') ||
+        v.name.toLowerCase().includes('aria') ||
+        v.name.toLowerCase().includes('female') ||
+        v.name.toLowerCase().includes('woman')
     );
 
-    // Fallback: any English voice
     if (!femaleVoice) {
-        femaleVoice = voices.find(v => v.lang.startsWith("en"));
+        femaleVoice = voices.find(v => v.lang && v.lang.startsWith('en'));
     }
 
-    console.log("Selected voice:", femaleVoice?.name);
+    console.log('Selected voice:', femaleVoice?.name);
 }
 
-// This line is CRITICAL
 speechSynthesis.onvoiceschanged = loadVoices;
 
 // SPEAK FUNCTION
 function speak() {
     const text =
-        document.getElementById("ttsText").value ||
-        "Hello, I am casey";
+        document.getElementById('ttsText').value ||
+        'Hello, I am casey';
 
     const utterance = new SpeechSynthesisUtterance(text);
 
@@ -192,11 +242,44 @@ function speak() {
         utterance.voice = femaleVoice;
     }
 
-    utterance.pitch = 1.3;   // feminine pitch
-    utterance.rate  = 0.95;  // natural speed
+    utterance.pitch = 1.3;
+    utterance.rate = 0.95;
     utterance.volume = 1;
 
     speechSynthesis.speak(utterance);
+}
+
+// Update device list (shows available video input devices)
+async function updateDeviceList() {
+    const select = videoSelect();
+    select.style.display = 'none';
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        select.innerHTML = '';
+        if (videoDevices.length === 0) {
+            msgEl().textContent = 'No video devices found.';
+            return;
+        }
+        videoDevices.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.deviceId;
+            opt.text = d.label || ('Camera ' + (select.length + 1));
+            select.appendChild(opt);
+        });
+        select.style.display = 'inline-block';
+        msgEl().textContent = '';
+    } catch (e) {
+        console.error('enumerateDevices failed', e);
+        msgEl().textContent = 'Unable to enumerate devices. Grant camera permission or try Refresh.';
+    }
+}
+
+// On load: try to populate devices if possible
+if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+    updateDeviceList().catch(e => console.warn(e));
+} else {
+    msgEl().textContent = 'Browser does not support media device enumeration.';
 }
 </script>
 
