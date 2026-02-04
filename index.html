@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Robot Interaction Panel</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Orbitron', sans-serif;
+}
+
+body {
+    height: 100vh;
+    background: radial-gradient(circle at top, #0f2027, #000);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #00ffe1;
+}
+
+.panel {
+    width: 92%;
+    max-width: 1000px;
+    padding: 35px;
+    background: rgba(0,0,0,0.8);
+    border-radius: 25px;
+    box-shadow: 0 0 40px #00ffe1;
+    text-align: center;
+}
+
+h1 {
+    margin-bottom: 25px;
+    letter-spacing: 3px;
+}
+
+.icons {
+    display: flex;
+    justify-content: center;
+    gap: 35px;
+    flex-wrap: wrap;
+}
+
+.icon {
+    width: 160px;
+    height: 160px;
+    background: linear-gradient(145deg, #00ffe1, #007777);
+    border-radius: 30px;
+    font-size: 3.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 0 25px #00ffe1;
+    transition: transform 0.25s, box-shadow 0.25s;
+}
+
+.icon:hover {
+    transform: scale(1.15);
+    box-shadow: 0 0 45px #00ffe1;
+}
+
+.label {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+}
+
+video {
+    width: 100%;
+    margin-top: 25px;
+    border-radius: 18px;
+    border: 2px solid #00ffe1;
+    display: none;
+    box-shadow: 0 0 25px #00ffe1;
+}
+
+input {
+    margin-top: 20px;
+    width: 80%;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    outline: none;
+    font-family: 'Orbitron', sans-serif;
+}
+</style>
+</head>
+
+<body>
+
+<div class="panel">
+    <h1>🤖 CAS-E INTERACTION PANEL</h1>
+
+    <div class="icons">
+        <div>
+            <div class="icon" onclick="toggleCamera()">📷</div>
+            <div class="label">CAMERA</div>
+        </div>
+
+        <div>
+            <div class="icon" onclick="toggleMic()">🎤</div>
+            <div class="label">MIC</div>
+        </div>
+
+        <div>
+            <div class="icon" onclick="speak()">🔊</div>
+            <div class="label">SPEAKER</div>
+        </div>
+    </div>
+
+    <video id="video" autoplay playsinline></video>
+
+    <input id="ttsText" type="text" placeholder="Type what the robot should say...">
+</div>
+
+<script>
+let camStream = null;
+let micStream = null;
+let audioElem = null;
+
+// CAMERA
+async function toggleCamera() {
+    const video = document.getElementById("video");
+
+    if (camStream) {
+        camStream.getTracks().forEach(t => t.stop());
+        camStream = null;
+        video.style.display = "none";
+        return;
+    }
+
+    camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = camStream;
+    video.style.display = "block";
+}
+
+// MIC → SPEAKER LOOPBACK
+async function toggleMic() {
+    if (micStream) {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+        if (audioElem) audioElem.pause();
+        return;
+    }
+
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioElem = new Audio();
+    audioElem.srcObject = micStream;
+    audioElem.play();
+}
+
+
+// TEXT TO SPEECH
+let femaleVoice = null;
+
+// Load voices (IMPORTANT)
+function loadVoices() {
+    const voices = speechSynthesis.getVoices();
+
+    femaleVoice = voices.find(v =>
+        v.name.toLowerCase().includes("zira") ||
+        v.name.toLowerCase().includes("aria") ||
+        v.name.toLowerCase().includes("female") ||
+        v.name.toLowerCase().includes("woman")
+    );
+
+    // Fallback: any English voice
+    if (!femaleVoice) {
+        femaleVoice = voices.find(v => v.lang.startsWith("en"));
+    }
+
+    console.log("Selected voice:", femaleVoice?.name);
+}
+
+// This line is CRITICAL
+speechSynthesis.onvoiceschanged = loadVoices;
+
+// SPEAK FUNCTION
+function speak() {
+    const text =
+        document.getElementById("ttsText").value ||
+        "Hello, I am casey";
+
+    const utterance = new SpeechSynthesisUtterance(text);
+
+    if (femaleVoice) {
+        utterance.voice = femaleVoice;
+    }
+
+    utterance.pitch = 1.3;   // feminine pitch
+    utterance.rate  = 0.95;  // natural speed
+    utterance.volume = 1;
+
+    speechSynthesis.speak(utterance);
+}
+</script>
+
+
+</body>
+</html>
